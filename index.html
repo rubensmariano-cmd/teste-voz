@@ -254,6 +254,8 @@ input,textarea,button,select{font-family:inherit;color:inherit}
 #ppt.voice-follow .ptword.vnext{color:#eef5ff;background:rgba(93,151,255,.24);box-shadow:0 0 0 3px rgba(93,151,255,.20);border-radius:4px;text-shadow:0 1px 5px rgba(0,0,0,.9)}
 .pt-voice-status{display:none;align-items:center;gap:6px;border:1px solid rgba(255,255,255,.13);background:rgba(0,0,0,.62);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);padding:6px 9px;border-radius:99px;color:rgba(255,255,255,.86);font-size:11px}
 .pt-voice-status.on{display:flex}.pt-voice-status i{display:block;width:6px;height:6px;border-radius:50%;background:#ff5264;animation:voicePulse 1s infinite}@keyframes voicePulse{50%{opacity:.22}}
+/* Mostra o que o navegador reconheceu, para facilitar o teste e identificar frases que não coincidiram. */
+.pt-voice-heard{position:absolute;z-index:11;top:55px;left:50%;transform:translateX(-50%) translateY(-5px);max-width:min(70vw,560px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:0;pointer-events:none;background:rgba(0,0,0,.66);border:1px solid rgba(255,255,255,.13);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:99px;padding:7px 11px;color:rgba(255,255,255,.88);font-size:11px;transition:opacity .2s,transform .2s}.pt-voice-heard.on{opacity:1;transform:translateX(-50%) translateY(0)}
 .ptft{position:absolute;top:0;left:0;right:0;height:110px;z-index:4;pointer-events:none}
 .ptfb{position:absolute;bottom:0;left:0;right:0;height:110px;z-index:4;pointer-events:none}
 .pt-guide{position:absolute;left:0;right:0;z-index:5;pointer-events:none;display:none}
@@ -698,6 +700,7 @@ input,textarea,button,select{font-family:inherit;color:inherit}
     <div class="pt-cd" id="ptCD"><div class="pt-cd-n" id="ptCDN">3</div></div>
     <div class="pt-alert-overlay" id="ptAlert"></div>
     <div class="pt-bigtimer" id="ptBigTimer"><span id="ptBigTimerText">00:00</span></div>
+    <div class="pt-voice-heard" id="ptVoiceHeard"></div>
     <div class="hud-t" id="hudT">
       <div style="display:flex;align-items:center;gap:7px">
         <button class="pill" onclick="closePT()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg><span id="ptTit" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span></button>
@@ -1735,12 +1738,20 @@ function ptMoveVoiceToLine(){
   const line=pt.voiceLines[ptVoiceCurrentLine()];if(!line)return;const ct=document.getElementById('ptC');
   pt.pos=Math.max(0,Math.min(pt.max,line.y-ct.clientHeight*.48));ptTextTransform();updPrg();updBigTimer();
 }
-function ptVoiceFollow(transcript){
+function ptVoiceSame(a,b){if(a===b)return true;if(!a||!b||Math.min(a.length,b.length)<5)return false;return a.startsWith(b.slice(0,Math.max(4,b.length-1)))||b.startsWith(a.slice(0,Math.max(4,a.length-1)));}
+function ptVoiceDebug(text,matched){const el=document.getElementById('ptVoiceHeard');if(!el)return;el.textContent=(matched?'Reconhecido: ':'Ouvindo: ')+text;el.classList.add('on');clearTimeout(pt.voiceDebugTimer);pt.voiceDebugTimer=setTimeout(()=>el.classList.remove('on'),3800);}
+function ptVoiceFollow(transcript,interim=false){
   const heard=ptVoiceNormalize(transcript).split(' ').filter(Boolean);if(!heard.length||!pt.voiceWords.length)return;
-  const script=pt.voiceWords.map(w=>w.norm),start=Math.max(0,pt.voiceCursor-8),end=Math.min(script.length,pt.voiceCursor+70);let best=null;
-  for(let size=Math.min(5,heard.length);size>=2;size--){const phrase=heard.slice(-size);for(let i=start;i<=end-size;i++){let ok=true;for(let j=0;j<size;j++){if(script[i+j]!==phrase[j]){ok=false;break}}if(ok){best={pos:i+size};break}}if(best)break}
-  if(!best){const last=heard[heard.length-1];if(last&&last.length>3){for(let i=start;i<Math.min(script.length,pt.voiceCursor+16);i++){if(script[i]===last){best={pos:i+1};break}}}}
-  if(best){pt.voiceCursor=Math.min(script.length-1,best.pos);ptUpdateVoiceHighlights();ptMoveVoiceToLine();}
+  const script=pt.voiceWords.map(w=>w.norm),start=Math.max(0,pt.voiceCursor-10),end=Math.min(script.length,pt.voiceCursor+130);let best=null;
+  // Procura blocos da frase reconhecida, não somente o final dela. Isso tolera pausas e resultados longos do Chrome.
+  const minSize=interim?3:2;
+  outer:for(let size=Math.min(6,heard.length);size>=minSize;size--){
+    for(let hStart=Math.max(0,heard.length-size);hStart>=0;hStart--){const phrase=heard.slice(hStart,hStart+size);
+      for(let i=start;i<=end-size;i++){let ok=true;for(let j=0;j<size;j++){if(!ptVoiceSame(script[i+j],phrase[j])){ok=false;break}}if(ok){best={pos:i+size};break outer}}
+    }
+  }
+  if(!best&&!interim){const last=heard[heard.length-1];if(last&&last.length>3){for(let i=start;i<Math.min(script.length,pt.voiceCursor+30);i++){if(ptVoiceSame(script[i],last)){best={pos:i+1};break}}}}
+  if(best){pt.voiceCursor=Math.min(script.length-1,best.pos);ptUpdateVoiceHighlights();ptMoveVoiceToLine();ptVoiceDebug(transcript,true);}else if(!interim)ptVoiceDebug(transcript,false);
 }
 function ptVoiceStatus(text,on){const el=document.getElementById('ptVoiceStatus');if(!el)return;el.querySelector('span').textContent=text;el.classList.toggle('on',!!on);}
 function ptStartVoice(){
@@ -1751,7 +1762,7 @@ function ptStartVoice(){
   if(!pt.voiceRecognition){
     const r=new SR();r.lang='pt-BR';r.continuous=true;r.interimResults=true;r.maxAlternatives=1;
     r.onstart=()=>{pt.voiceListening=true;ptVoiceStatus('Ouvindo',true);};
-    r.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal){const text=e.results[i][0].transcript;if(text!==pt.voiceLastFinal){pt.voiceLastFinal=text;ptVoiceFollow(text)}}}};
+    r.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){const text=e.results[i][0].transcript;if(e.results[i].isFinal){if(text!==pt.voiceLastFinal){pt.voiceLastFinal=text;ptVoiceFollow(text,false)}}else ptVoiceFollow(text,true)}};
     r.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed'){pt.voiceShouldListen=false;pt.voiceListening=false;ptVoiceStatus('Microfone bloqueado',false);toast('Permita o microfone para este site e tente novamente.','error');ptSetPlay(false);}else if(e.error!=='no-speech'){toast('Reconhecimento de voz: '+e.error,'error')}};
     r.onend=()=>{pt.voiceListening=false;if(pt.voiceShouldListen&&pt.play){setTimeout(()=>{try{r.start()}catch(e){}},350)}else ptVoiceStatus('',false);};pt.voiceRecognition=r;
   }
